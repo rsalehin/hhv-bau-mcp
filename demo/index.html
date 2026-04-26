@@ -1,0 +1,520 @@
+﻿<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HHV-Bau · MCP Demo</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg0:#05060b;--bg1:#090c17;--bg2:#0d1120;--bg3:#141928;
+    --border:#1b2035;--borderhi:#262f4a;
+    --blue:#4f7ef7;--blue-d:rgba(79,126,247,0.12);
+    --green:#22d3a8;--green-d:rgba(34,211,168,0.1);
+    --amber:#f5a623;--amber-d:rgba(245,166,35,0.1);
+    --red:#f87171;--red-d:rgba(248,113,113,0.1);
+    --purple:#a78bfa;--purple-d:rgba(167,139,250,0.1);
+    --text:#dde0ef;--dim:#7a8db0;--muted:#38446a;
+    --mono:'IBM Plex Mono','Fira Code',monospace;
+    --sans:'IBM Plex Sans',-apple-system,sans-serif;
+  }
+  body{font-family:var(--sans);background:var(--bg0);color:var(--text);height:100vh;display:flex;flex-direction:column;overflow:hidden;font-size:13px}
+  ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
+  .fade-in{animation:fadeUp .22s ease both}
+  .suggestion-chip:hover{background:var(--bg3)!important;border-color:var(--blue)!important;color:var(--blue)!important}
+  .send-btn:hover:not(:disabled){background:#3b6ae8!important}
+  .send-btn:disabled{opacity:.35;cursor:not-allowed}
+  .key-gate{position:fixed;inset:0;background:rgba(5,6,11,0.97);display:flex;align-items:center;justify-content:center;z-index:100}
+  .key-box{background:#090c17;border:1px solid #262f4a;border-radius:12px;padding:32px;width:380px;max-width:90vw}
+  .key-input{width:100%;background:#0d1120;border:1px solid #1b2035;border-radius:8px;padding:10px 12px;color:#dde0ef;font-family:monospace;font-size:12px;margin:12px 0}
+  .key-input:focus{outline:none;border-color:#4f7ef7}
+  .key-btn{width:100%;background:#4f7ef7;border:none;border-radius:8px;padding:10px;color:white;font-size:13px;cursor:pointer;font-family:inherit}
+  input:focus{outline:none}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script type="module">
+import { createElement as h, useState, useRef, useEffect } from 'https://esm.sh/react@18';
+import { createRoot } from 'https://esm.sh/react-dom@18/client';
+
+const C = {
+  bg0:'#05060b',bg1:'#090c17',bg2:'#0d1120',bg3:'#141928',
+  border:'#1b2035',borderHi:'#262f4a',
+  blue:'#4f7ef7',blueD:'rgba(79,126,247,0.12)',
+  green:'#22d3a8',greenD:'rgba(34,211,168,0.1)',
+  amber:'#f5a623',amberD:'rgba(245,166,35,0.1)',
+  red:'#f87171',redD:'rgba(248,113,113,0.1)',
+  purple:'#a78bfa',purpleD:'rgba(167,139,250,0.1)',
+  text:'#dde0ef',dim:'#7a8db0',muted:'#38446a',
+  mono:"'IBM Plex Mono','Fira Code',monospace",
+  sans:"'IBM Plex Sans',-apple-system,sans-serif",
+};
+const STATUS = {
+  genehmigt:{c:C.green,icon:'✓',label:'Genehmigt'},
+  in_bearbeitung:{c:C.blue,icon:'⟳',label:'In Bearbeitung'},
+  ausstehend:{c:C.amber,icon:'◷',label:'Ausstehend'},
+  überfällig:{c:C.red,icon:'!',label:'Überfällig'},
+  abgelehnt:{c:C.muted,icon:'✕',label:'Abgelehnt'},
+};
+const TOOL_META = {
+  search_permits:{c:C.blue,icon:'⊕',label:'search_permits'},
+  get_permit_details:{c:C.purple,icon:'◉',label:'get_permit_details'},
+  get_kpi_summary:{c:C.green,icon:'▦',label:'get_kpi_summary'},
+  prepare_data_entry:{c:C.amber,icon:'✎',label:'prepare_data_entry'},
+};
+
+const TODAY = '2024-04-26';
+
+const PERMITS = [
+  {id:'BG-2024-0001',applicant:'Thomas Müller',address:'Hauptstraße 12, 04109 Leipzig',type:'Neubau',status:'genehmigt',submitted:'2024-01-15',deadline:'2024-04-15',missing:[],clerk:'Sabine Koch',note:'Einfamilienhaus, 2 Geschosse, 180 m²'},
+  {id:'BG-2024-0002',applicant:'Petra Hoffmann',address:'Schillerstraße 5, 04109 Leipzig',type:'Umbau',status:'in_bearbeitung',submitted:'2024-02-01',deadline:'2024-05-01',missing:['Statiknachweis','Brandschutznachweis'],clerk:'Martin Weber',note:'Dachgeschoss zu Wohnnutzung'},
+  {id:'BG-2024-0003',applicant:'Klaus Schmidt',address:'Goethestraße 28, 04105 Leipzig',type:'Abriss',status:'ausstehend',submitted:'2024-02-15',deadline:'2024-05-15',missing:['Lageplan (amtl. beglaubigt)','Katasterauszug'],clerk:'Anna Hoffmann',note:'Abriss Altbau, 3 Geschosse'},
+  {id:'BG-2024-0004',applicant:'Maria Weber',address:'Bahnhofstraße 44, 04109 Leipzig',type:'Nutzungsänderung',status:'überfällig',submitted:'2024-01-20',deadline:'2024-03-20',missing:['Brandschutznachweis','Entwässerungsplan'],clerk:'Klaus Richter',note:'Büro zu Wohnung'},
+  {id:'BG-2024-0005',applicant:'Andreas Fischer',address:'Lindenallee 7, 04229 Leipzig',type:'Neubau',status:'in_bearbeitung',submitted:'2024-03-01',deadline:'2024-06-01',missing:['Energieausweis (EnEV)'],clerk:'Jana Schmidt',note:'Doppelhaushälfte, 2 Geschosse'},
+  {id:'BG-2024-0006',applicant:'Sabine Braun',address:'Rosenstraße 19, 04103 Leipzig',type:'Umbau',status:'genehmigt',submitted:'2024-01-10',deadline:'2024-04-10',missing:[],clerk:'Sabine Koch',note:'Fassadensanierung EG+OG'},
+  {id:'BG-2024-0007',applicant:'Günter Lehmann',address:'Kastanienallee 3, 04105 Leipzig',type:'Neubau',status:'überfällig',submitted:'2023-12-01',deadline:'2024-03-01',missing:['Bauzeichnung (Grundriss)','Abstandsflächennachweis','Unterschriftenblatt'],clerk:'Martin Weber',note:'Garage und Carport'},
+  {id:'BG-2024-0008',applicant:'Ingrid Schulz',address:'Friedrichstraße 88, 04107 Leipzig',type:'Nutzungsänderung',status:'genehmigt',submitted:'2024-02-20',deadline:'2024-05-20',missing:[],clerk:'Anna Hoffmann',note:'Laden zu Restaurant'},
+  {id:'BG-2024-0009',applicant:'Werner Becker',address:'Südstraße 15, 04277 Leipzig',type:'Umbau',status:'in_bearbeitung',submitted:'2024-03-10',deadline:'2024-06-10',missing:['Statiknachweis'],clerk:'Klaus Richter',note:'Balkonsanierung, 4-geschossig'},
+  {id:'BG-2024-0010',applicant:'Hannelore Neumann',address:'Weststraße 42, 04229 Leipzig',type:'Neubau',status:'ausstehend',submitted:'2024-04-01',deadline:'2024-07-01',missing:['Lageplan (amtl. beglaubigt)','Bauzeichnung','Energieausweis (EnEV)'],clerk:'Jana Schmidt',note:'Reihenendhaus, 3 Geschosse'},
+  {id:'BG-2024-0011',applicant:'Bernd Zimmermann',address:'Nordstraße 6, 04105 Leipzig',type:'Abriss',status:'genehmigt',submitted:'2024-01-25',deadline:'2024-04-25',missing:[],clerk:'Sabine Koch',note:'Industriehalle, 1.200 m²'},
+  {id:'BG-2024-0012',applicant:'Claudia Wagner',address:'Eisenbahnstraße 77, 04315 Leipzig',type:'Neubau',status:'abgelehnt',submitted:'2024-02-10',deadline:'2024-05-10',missing:[],clerk:'Martin Weber',note:'GRZ überschritten'},
+  {id:'BG-2024-0013',applicant:'Rolf Hartmann',address:'Plagwitzer Straße 21, 04229 Leipzig',type:'Umbau',status:'überfällig',submitted:'2024-01-05',deadline:'2024-03-05',missing:['Baulastenauskunft','Entwässerungsplan'],clerk:'Anna Hoffmann',note:'Keller zu Gewerbe'},
+  {id:'BG-2024-0014',applicant:'Monika Klein',address:'Bornaische Straße 34, 04277 Leipzig',type:'Nutzungsänderung',status:'in_bearbeitung',submitted:'2024-03-15',deadline:'2024-06-15',missing:['Brandschutznachweis'],clerk:'Klaus Richter',note:'Praxis zu Büro, 3. OG'},
+  {id:'BG-2024-0015',applicant:'Hans-Peter Voigt',address:'Karl-Liebknecht-Str. 50, 04107 Leipzig',type:'Neubau',status:'in_bearbeitung',submitted:'2024-03-20',deadline:'2024-06-20',missing:['Katasterauszug','Abstandsflächennachweis'],clerk:'Jana Schmidt',note:'MFH, 5 Wohneinheiten'},
+  {id:'BG-2024-0016',applicant:'Elke Bergmann',address:'Koburger Straße 8, 04277 Leipzig',type:'Umbau',status:'ausstehend',submitted:'2024-04-05',deadline:'2024-07-05',missing:['Statiknachweis','Brandschutznachweis','Energieausweis (EnEV)'],clerk:'Sabine Koch',note:'Wintergarten EG'},
+  {id:'BG-2024-0017',applicant:'Dieter Krause',address:'Oststraße 103, 04315 Leipzig',type:'Neubau',status:'genehmigt',submitted:'2024-01-18',deadline:'2024-04-18',missing:[],clerk:'Martin Weber',note:'Bürogebäude, 3 Geschosse'},
+  {id:'BG-2024-0018',applicant:'Ute Herrmann',address:'Zschochersche Str. 56, 04229 Leipzig',type:'Abriss',status:'in_bearbeitung',submitted:'2024-02-28',deadline:'2024-05-28',missing:['Katasterauszug'],clerk:'Anna Hoffmann',note:'Nebengebäude Abbruch'},
+  {id:'BG-2024-0019',applicant:'Frank Dietrich',address:'Gerichtsweg 4, 04103 Leipzig',type:'Nutzungsänderung',status:'ausstehend',submitted:'2024-04-10',deadline:'2024-07-10',missing:['Lageplan (amtl. beglaubigt)','Unterschriftenblatt'],clerk:'Klaus Richter',note:'Lager zu Wohnen, OG'},
+  {id:'BG-2024-0020',applicant:'Renate Schreiber',address:'Härtelstraße 8, 04107 Leipzig',type:'Neubau',status:'überfällig',submitted:'2023-11-15',deadline:'2024-02-15',missing:['Bauzeichnung (Grundriss)','Statiknachweis','Lageplan'],clerk:'Jana Schmidt',note:'Carport und Gartenhaus'},
+  {id:'BG-2024-0021',applicant:'Otto Schäfer',address:'Josephstraße 12, 04177 Leipzig',type:'Umbau',status:'genehmigt',submitted:'2024-01-30',deadline:'2024-04-30',missing:[],clerk:'Sabine Koch',note:'Dachabdichtung'},
+  {id:'BG-2024-0022',applicant:'Margot König',address:'Lützner Straße 88, 04177 Leipzig',type:'Neubau',status:'in_bearbeitung',submitted:'2024-03-25',deadline:'2024-06-25',missing:['Energieausweis (EnEV)','Entwässerungsplan'],clerk:'Martin Weber',note:'Wohnhaus mit Einliegerwohnung'},
+  {id:'BG-2024-0023',applicant:'Jürgen Bauer',address:'Mockauer Straße 55, 04357 Leipzig',type:'Umbau',status:'ausstehend',submitted:'2024-04-12',deadline:'2024-07-12',missing:['Statiknachweis','Abstandsflächennachweis'],clerk:'Anna Hoffmann',note:'Terrassenüberdachung'},
+  {id:'BG-2024-0024',applicant:'Hildegard Richter',address:'Torgauer Straße 20, 04318 Leipzig',type:'Nutzungsänderung',status:'genehmigt',submitted:'2024-02-05',deadline:'2024-05-05',missing:[],clerk:'Klaus Richter',note:'Kita-Umbau'},
+  {id:'BG-2024-0025',applicant:'Volker Pfeiffer',address:'Wurzner Straße 14, 04318 Leipzig',type:'Neubau',status:'abgelehnt',submitted:'2024-02-22',deadline:'2024-05-22',missing:[],clerk:'Jana Schmidt',note:'Parkplatznachweise fehlen'},
+  {id:'BG-2024-0026',applicant:'Brigitte Lorenz',address:'Engelsdorfer Straße 7, 04319 Leipzig',type:'Umbau',status:'überfällig',submitted:'2024-01-02',deadline:'2024-03-02',missing:['Brandschutznachweis','Baulastenauskunft'],clerk:'Sabine Koch',note:'Heizanlage Keller'},
+  {id:'BG-2024-0027',applicant:'Manfred Krüger',address:'Holzhäuser Straße 33, 04299 Leipzig',type:'Neubau',status:'genehmigt',submitted:'2024-01-08',deadline:'2024-04-08',missing:[],clerk:'Martin Weber',note:'EFH, Massivbau, 220 m²'},
+  {id:'BG-2024-0028',applicant:'Elfriede Sommer',address:'Probstheidaer Str. 4, 04299 Leipzig',type:'Abriss',status:'in_bearbeitung',submitted:'2024-03-08',deadline:'2024-06-08',missing:['Katasterauszug','Unterschriftenblatt'],clerk:'Anna Hoffmann',note:'Teilabriss Wirtschaftsgebäude'},
+  {id:'BG-2024-0029',applicant:'Herbert Lange',address:'Stötteritzer Straße 91, 04299 Leipzig',type:'Nutzungsänderung',status:'ausstehend',submitted:'2024-04-15',deadline:'2024-07-15',missing:['Lageplan','Brandschutznachweis','Entwässerungsplan'],clerk:'Klaus Richter',note:'Arztpraxis zu Büro'},
+  {id:'BG-2024-0030',applicant:'Waltraud Fuchs',address:'Windmühlenstraße 17, 04107 Leipzig',type:'Neubau',status:'in_bearbeitung',submitted:'2024-03-18',deadline:'2024-06-18',missing:['Abstandsflächennachweis'],clerk:'Jana Schmidt',note:'Wintergarten EG, 28 m²'},
+  {id:'BG-2024-0031',applicant:'Lothar Stein',address:'Connewitzer Straße 45, 04277 Leipzig',type:'Umbau',status:'genehmigt',submitted:'2024-02-14',deadline:'2024-05-14',missing:[],clerk:'Sabine Koch',note:'Fenstererneuerung gesamt'},
+  {id:'BG-2024-0032',applicant:'Adelheid Möller',address:'Meusdorfer Straße 3, 04277 Leipzig',type:'Neubau',status:'überfällig',submitted:'2023-12-10',deadline:'2024-03-10',missing:['Bauzeichnung (Grundriss)','Katasterauszug'],clerk:'Martin Weber',note:'Tiny House auf Eigengrund'},
+  {id:'BG-2024-0033',applicant:'Gerd Wolff',address:'Raschwitzer Straße 22, 04207 Leipzig',type:'Abriss',status:'ausstehend',submitted:'2024-04-18',deadline:'2024-07-18',missing:['Statiknachweis','Baulastenauskunft'],clerk:'Anna Hoffmann',note:'Stallgebäude, Dorfkern'},
+  {id:'BG-2024-0034',applicant:'Hilde Brandt',address:'Grünauer Allee 60, 04207 Leipzig',type:'Nutzungsänderung',status:'genehmigt',submitted:'2024-01-22',deadline:'2024-04-22',missing:[],clerk:'Klaus Richter',note:'Supermarkt zu Fitnessstudio'},
+  {id:'BG-2024-0035',applicant:'Siegfried Kramer',address:'Ratzelstraße 8, 04207 Leipzig',type:'Neubau',status:'in_bearbeitung',submitted:'2024-03-28',deadline:'2024-06-28',missing:['Energieausweis (EnEV)','Brandschutznachweis'],clerk:'Jana Schmidt',note:'MFH, 8 WE, KfW 55'},
+  {id:'BG-2024-0036',applicant:'Christiane Henkel',address:'Georg-Schwarz-Str. 100, 04179 Leipzig',type:'Umbau',status:'ausstehend',submitted:'2024-04-20',deadline:'2024-07-20',missing:['Statiknachweis','Unterschriftenblatt','Entwässerungsplan'],clerk:'Sabine Koch',note:'Industriehalle zu Loft'},
+  {id:'BG-2024-0037',applicant:'Rudolf Koch',address:'Luisenstraße 14, 04315 Leipzig',type:'Neubau',status:'genehmigt',submitted:'2024-01-28',deadline:'2024-04-28',missing:[],clerk:'Martin Weber',note:'Fertiggarage'},
+  {id:'BG-2024-0038',applicant:'Anneliese Becker',address:'Rietzschkestraße 29, 04347 Leipzig',type:'Abriss',status:'genehmigt',submitted:'2024-02-08',deadline:'2024-05-08',missing:[],clerk:'Anna Hoffmann',note:'Scheune, baufällig'},
+  {id:'BG-2024-0039',applicant:'Norbert Hahn',address:'Portitzer Allee 5, 04356 Leipzig',type:'Nutzungsänderung',status:'abgelehnt',submitted:'2024-03-03',deadline:'2024-06-03',missing:[],clerk:'Klaus Richter',note:'Kurzzeitvermietung'},
+  {id:'BG-2024-0040',applicant:'Margit Schulze',address:'Permoserstraße 11, 04318 Leipzig',type:'Neubau',status:'in_bearbeitung',submitted:'2024-03-22',deadline:'2024-06-22',missing:['Lageplan (amtl. beglaubigt)'],clerk:'Jana Schmidt',note:'EFH mit Einliegerwohnung'},
+  {id:'BG-2024-0041',applicant:'Eberhard Naumann',address:'Mockauer Straße 3, 04357 Leipzig',type:'Umbau',status:'überfällig',submitted:'2024-01-03',deadline:'2024-03-03',missing:['Bauzeichnung','Abstandsflächennachweis','Brandschutznachweis'],clerk:'Sabine Koch',note:'EG barrierefrei'},
+  {id:'BG-2024-0042',applicant:'Rosemarie Pohl',address:'Kieler Straße 66, 04357 Leipzig',type:'Neubau',status:'ausstehend',submitted:'2024-04-22',deadline:'2024-07-22',missing:['Statiknachweis','Katasterauszug','Energieausweis (EnEV)'],clerk:'Martin Weber',note:'Bürogebäude, 2 Geschosse'},
+  {id:'BG-2024-0043',applicant:'Wilhelmine Dressler',address:'Heiterblickallee 30, 04349 Leipzig',type:'Abriss',status:'genehmigt',submitted:'2024-02-12',deadline:'2024-05-12',missing:[],clerk:'Anna Hoffmann',note:'Gartenlaube >24 m²'},
+  {id:'BG-2024-0044',applicant:'Friedhelm Möbius',address:'Schönefelder Allee 4, 04356 Leipzig',type:'Nutzungsänderung',status:'in_bearbeitung',submitted:'2024-03-30',deadline:'2024-06-30',missing:['Brandschutznachweis','Entwässerungsplan'],clerk:'Klaus Richter',note:'Lager zu KFZ-Werkstatt'},
+  {id:'BG-2024-0045',applicant:'Konstanze Müller-Braun',address:'Seehausener Allee 7, 04356 Leipzig',type:'Neubau',status:'genehmigt',submitted:'2024-01-12',deadline:'2024-04-12',missing:[],clerk:'Jana Schmidt',note:'Supermarkt, 800 m²'},
+  {id:'BG-2024-0046',applicant:'Theodor Buchholz',address:'Quelle 4, 04356 Leipzig',type:'Umbau',status:'in_bearbeitung',submitted:'2024-03-05',deadline:'2024-06-05',missing:['Statiknachweis'],clerk:'Sabine Koch',note:'Aufstockung, 1 Geschoss'},
+  {id:'BG-2024-0047',applicant:'Walburga Günther',address:'Dieskaustraße 44, 04249 Leipzig',type:'Neubau',status:'ausstehend',submitted:'2024-04-25',deadline:'2024-07-25',missing:['Lageplan','Bauzeichnung','Unterschriftenblatt','Energieausweis'],clerk:'Martin Weber',note:'EFH, Holzrahmenbau'},
+  {id:'BG-2024-0048',applicant:'Reinhold Kraft',address:'Knautnaundorfer Str. 2, 04249 Leipzig',type:'Abriss',status:'ausstehend',submitted:'2024-04-28',deadline:'2024-07-28',missing:['Katasterauszug','Baulastenauskunft'],clerk:'Anna Hoffmann',note:'Plattenbau, Teilrückbau'},
+  {id:'BG-2024-0049',applicant:'Ingeborg Seidel',address:'Ratsholzstraße 7, 04207 Leipzig',type:'Nutzungsänderung',status:'genehmigt',submitted:'2024-02-18',deadline:'2024-05-18',missing:[],clerk:'Klaus Richter',note:'Wohnhaus zu Pflegeheim'},
+  {id:'BG-2024-0050',applicant:'Berthold Arndt',address:'Tarostraße 15, 04105 Leipzig',type:'Neubau',status:'in_bearbeitung',submitted:'2024-04-02',deadline:'2024-07-02',missing:['Abstandsflächennachweis','Entwässerungsplan'],clerk:'Jana Schmidt',note:'Parkhaus, 120 Stellplätze'},
+];
+
+const TOOL_DEFS = [
+  {name:'search_permits',description:'Sucht Baugenehmigungen nach Antragsteller, Adresse, Status oder Typ.',input_schema:{type:'object',properties:{applicant_name:{type:'string'},address:{type:'string'},status_filter:{type:'string'},type_filter:{type:'string'}},required:[]}},
+  {name:'get_permit_details',description:'Vollständige Details zu einer Baugenehmigung inkl. fehlender Dokumente.',input_schema:{type:'object',properties:{permit_id:{type:'string'}},required:['permit_id']}},
+  {name:'get_kpi_summary',description:'KPI-Übersicht: Statusverteilung, überfällige Anträge, Sachbearbeiter-Workload.',input_schema:{type:'object',properties:{overdue_days:{type:'number'},status_filter:{type:'string'}},required:[]}},
+  {name:'prepare_data_entry',description:'Bereitet Genehmigungsformular vor mit aktuellem Datum und Antragstellerdaten.',input_schema:{type:'object',properties:{permit_id:{type:'string'},field_updates:{type:'object'}},required:['permit_id']}},
+];
+
+function executeTool(name, input) {
+  switch(name) {
+    case 'search_permits': {
+      let r = [...PERMITS];
+      if(input.applicant_name) r=r.filter(p=>p.applicant.toLowerCase().includes(input.applicant_name.toLowerCase()));
+      if(input.address) r=r.filter(p=>p.address.toLowerCase().includes(input.address.toLowerCase()));
+      if(input.status_filter) r=r.filter(p=>p.status===input.status_filter);
+      if(input.type_filter) r=r.filter(p=>p.type===input.type_filter);
+      return {count:r.length,permits:r.map(p=>({id:p.id,applicant:p.applicant,address:p.address,type:p.type,status:p.status,submitted:p.submitted,deadline:p.deadline,missing_count:p.missing.length,clerk:p.clerk}))};
+    }
+    case 'get_permit_details': {
+      const p=PERMITS.find(x=>x.id===input.permit_id);
+      if(!p) return {error:`Genehmigung ${input.permit_id} nicht gefunden`};
+      const days=Math.floor((new Date(TODAY)-new Date(p.deadline))/86400000);
+      return {...p,days_overdue:Math.max(0,days),is_overdue:days>0,missing_count:p.missing.length};
+    }
+    case 'get_kpi_summary': {
+      const od=input.overdue_days||0;
+      const bySt={};PERMITS.forEach(p=>{bySt[p.status]=(bySt[p.status]||0)+1});
+      const byTy={};PERMITS.forEach(p=>{byTy[p.type]=(byTy[p.type]||0)+1});
+      const overdue=PERMITS.filter(p=>{const d=Math.floor((new Date(TODAY)-new Date(p.deadline))/86400000);return d>od;});
+      const byCl={};PERMITS.forEach(p=>{byCl[p.clerk]=(byCl[p.clerk]||0)+1});
+      return {total:PERMITS.length,by_status:bySt,by_type:byTy,overdue_count:overdue.length,overdue_list:overdue.map(p=>({id:p.id,applicant:p.applicant,deadline:p.deadline,days_over:Math.floor((new Date(TODAY)-new Date(p.deadline))/86400000),clerk:p.clerk})),with_missing_docs:PERMITS.filter(p=>p.missing.length>0).length,clerks:byCl};
+    }
+    case 'prepare_data_entry': {
+      const p=PERMITS.find(x=>x.id===input.permit_id);
+      if(!p) return {error:`Genehmigung ${input.permit_id} nicht gefunden`};
+      return {status:'bereit',permit_id:p.id,antragsteller:p.applicant,vollstaendig:p.missing.length===0,fehlende_dokumente:p.missing,pre_filled:{genehmigungsnummer:p.id,antragsteller:p.applicant,adresse:p.address,vorhabentyp:p.type,eingangsdatum:p.submitted,frist:p.deadline,bearbeitungsdatum:TODAY,sachbearbeiter:p.clerk,genehmigungsdatum:TODAY,unterschrift_datum:TODAY,formular_version:'VwVfG §73 — Ausg. 2024',...(input.field_updates||{})}};
+    }
+    default: return {error:`Unbekanntes Tool: ${name}`};
+  }
+}
+
+const SYSTEM=`Du bist ein KI-Assistent für das HHV-Bau Bauamt-System Leipzig. Du hilfst Sachbearbeitern effizient mit Baugenehmigungen. Nutze immer die verfügbaren Tools um aktuelle Daten abzurufen. Antworte prägnant und professionell auf Deutsch. Datum heute: ${TODAY}.`;
+
+const SUGGESTIONS=['Zeig alle überfälligen Genehmigungen','Was fehlt noch bei BG-2024-0015?','KPI-Übersicht: wie viele sind 30+ Tage überfällig?','Bereite Formular für BG-2024-0024 vor','Alle Neubauten in Bearbeitung'];
+
+function StatusBadge({status,small}){
+  const m=STATUS[status]||STATUS.ausstehend;
+  const sz=small?{fontSize:9,padding:'1px 5px'}:{fontSize:10,padding:'2px 7px'};
+  return h('span',{style:{fontFamily:C.mono,color:m.c,background:m.c+'18',border:`1px solid ${m.c}30`,borderRadius:4,whiteSpace:'nowrap',...sz}},`${m.icon} ${m.label}`);
+}
+
+function Row({label,value,mono,color}){
+  return h('div',{style:{display:'flex',gap:8,padding:'4px 0',borderBottom:`1px solid ${C.border}`}},
+    h('span',{style:{color:C.muted,fontFamily:C.mono,fontSize:10,width:120,flexShrink:0,paddingTop:1}},label),
+    h('span',{style:{color:color||C.dim,fontFamily:mono?C.mono:C.sans,fontSize:mono?10:12,wordBreak:'break-all'}},value||'—')
+  );
+}
+
+function SearchResultViz({result}){
+  if(!result||result.error) return h('div',{style:{color:C.red,fontFamily:C.mono,fontSize:11}},result?.error||'Fehler');
+  const {count,permits}=result;
+  return h('div',null,
+    h('div',{style:{display:'flex',gap:8,alignItems:'center',marginBottom:10}},
+      h('span',{style:{fontFamily:C.mono,fontSize:22,fontWeight:500,color:C.text}},count),
+      h('span',{style:{color:C.dim,fontSize:11}},count===1?'Genehmigung gefunden':'Genehmigungen gefunden')
+    ),
+    h('div',{style:{overflowX:'auto'}},
+      h('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:11,fontFamily:C.mono}},
+        h('thead',null,h('tr',null,
+          ...[['ID',90],['Status',110],['Typ',90],['Frist',80],['Sachb.',90]].map(([t,w])=>
+            h('th',{key:t,style:{textAlign:'left',color:C.muted,padding:'3px 6px',fontWeight:500,width:w,borderBottom:`1px solid ${C.border}`}},t)
+          )
+        )),
+        h('tbody',null,permits.slice(0,8).map(p=>
+          h('tr',{key:p.id},
+            h('td',{style:{padding:'4px 6px',color:C.blue,fontSize:10}},p.id),
+            h('td',{style:{padding:'4px 6px'}},h(StatusBadge,{status:p.status,small:true})),
+            h('td',{style:{padding:'4px 6px',color:C.dim,fontSize:10}},p.type),
+            h('td',{style:{padding:'4px 6px',color:C.dim,fontSize:10}},p.deadline.slice(5)),
+            h('td',{style:{padding:'4px 6px',color:C.dim,fontSize:10}},p.clerk.split(' ')[0]),
+          )
+        ))
+      )
+    ),
+    permits.length>8&&h('div',{style:{color:C.muted,fontFamily:C.mono,fontSize:10,marginTop:5,textAlign:'right'}},`+ ${permits.length-8} weitere`)
+  );
+}
+
+function PermitDetailViz({result}){
+  if(!result||result.error) return h('div',{style:{color:C.red,fontFamily:C.mono,fontSize:11}},result?.error||'Nicht gefunden');
+  return h('div',null,
+    h('div',{style:{display:'flex',gap:8,alignItems:'center',marginBottom:10}},
+      h('span',{style:{fontFamily:C.mono,fontSize:12,color:C.blue}},result.id),
+      h(StatusBadge,{status:result.status}),
+      result.is_overdue&&h('span',{style:{fontFamily:C.mono,fontSize:10,color:C.red,background:C.redD,border:`1px solid ${C.red}30`,padding:'2px 6px',borderRadius:4}},`${result.days_overdue} Tage überfällig`)
+    ),
+    h('div',{style:{marginBottom:10}},
+      h(Row,{label:'Antragsteller',value:result.applicant}),
+      h(Row,{label:'Adresse',value:result.address}),
+      h(Row,{label:'Vorhabentyp',value:result.type,color:C.purple}),
+      h(Row,{label:'Eingereicht',value:result.submitted,mono:true}),
+      h(Row,{label:'Frist',value:result.deadline,mono:true,color:result.is_overdue?C.red:C.dim}),
+      h(Row,{label:'Sachbearbeiter',value:result.clerk}),
+      h(Row,{label:'Hinweis',value:result.note}),
+    ),
+    result.missing.length>0
+      ? h('div',null,
+          h('div',{style:{fontFamily:C.mono,fontSize:10,color:C.amber,marginBottom:5}},`⚠ ${result.missing.length} fehlende Dokument${result.missing.length>1?'e':''}:`),
+          ...result.missing.map(doc=>h('div',{key:doc,style:{fontFamily:C.mono,fontSize:10,color:C.dim,padding:'3px 0 3px 14px',borderLeft:`2px solid ${C.amber}40`}},`→ ${doc}`))
+        )
+      : h('div',{style:{fontFamily:C.mono,fontSize:10,color:C.green}},`✓ Alle Dokumente vollständig`)
+  );
+}
+
+function KpiViz({result}){
+  if(!result) return null;
+  const stats=[
+    {label:'Gesamt',value:result.total,color:C.text},
+    {label:'Genehmigt',value:result.by_status.genehmigt||0,color:C.green},
+    {label:'In Bearb.',value:result.by_status.in_bearbeitung||0,color:C.blue},
+    {label:'Überfällig',value:result.overdue_count,color:C.red},
+    {label:'Ausstehend',value:result.by_status.ausstehend||0,color:C.amber},
+    {label:'Fehl. Docs',value:result.with_missing_docs,color:C.purple},
+  ];
+  return h('div',null,
+    h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:6,marginBottom:12}},
+      stats.map(s=>h('div',{key:s.label,style:{background:s.color+'10',border:`1px solid ${s.color}25`,borderRadius:6,padding:'8px 10px'}},
+        h('div',{style:{fontFamily:C.mono,fontSize:20,fontWeight:500,color:s.color,lineHeight:1}},s.value),
+        h('div',{style:{fontFamily:C.mono,fontSize:9,color:C.muted,marginTop:2}},s.label)
+      ))
+    ),
+    result.overdue_list?.length>0&&h('div',null,
+      h('div',{style:{fontFamily:C.mono,fontSize:10,color:C.red,marginBottom:5}},`Überfällige Anträge:`),
+      ...result.overdue_list.slice(0,5).map(p=>
+        h('div',{key:p.id,style:{display:'flex',justifyContent:'space-between',fontFamily:C.mono,fontSize:10,padding:'3px 0',borderBottom:`1px solid ${C.border}`,color:C.dim}},
+          h('span',{style:{color:C.blue}},p.id),
+          h('span',null,p.applicant.split(' ')[1]),
+          h('span',{style:{color:C.red}},`${p.days_over}d`)
+        )
+      )
+    )
+  );
+}
+
+function DataEntryViz({result}){
+  if(!result||result.error) return h('div',{style:{color:C.red,fontFamily:C.mono,fontSize:11}},result?.error||'Fehler');
+  return h('div',null,
+    h('div',{style:{display:'flex',gap:8,alignItems:'center',marginBottom:10}},
+      h('span',{style:{fontFamily:C.mono,fontSize:10,color:C.green,background:C.greenD,border:`1px solid ${C.green}30`,padding:'2px 8px',borderRadius:4}},`✓ ${result.vollstaendig?'Bereit zur Einreichung':'Vorausgefüllt'}`),
+      h('span',{style:{color:C.dim,fontSize:11}},result.antragsteller)
+    ),
+    h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'2px 12px'}},
+      Object.entries(result.pre_filled).map(([k,v])=>h('div',{key:k,style:{padding:'3px 0',borderBottom:`1px solid ${C.border}20`}},
+        h('div',{style:{fontFamily:C.mono,fontSize:9,color:C.muted}},k),
+        h('div',{style:{fontFamily:C.mono,fontSize:10,color:k.includes('datum')||k.includes('version')?C.amber:C.dim,marginTop:1}},String(v).slice(0,30))
+      ))
+    ),
+    result.fehlende_dokumente?.length>0&&h('div',{style:{marginTop:8,padding:8,background:C.amberD,border:`1px solid ${C.amber}20`,borderRadius:6}},
+      h('div',{style:{fontFamily:C.mono,fontSize:10,color:C.amber}},`⚠ ${result.fehlende_dokumente.length} Dok. noch ausstehend`)
+    )
+  );
+}
+
+function ToolResultViz({call}){
+  if(!call) return null;
+  if(call.tool==='search_permits') return h(SearchResultViz,{result:call.result});
+  if(call.tool==='get_permit_details') return h(PermitDetailViz,{result:call.result});
+  if(call.tool==='get_kpi_summary') return h(KpiViz,{result:call.result});
+  if(call.tool==='prepare_data_entry') return h(DataEntryViz,{result:call.result});
+  return h('pre',{style:{fontFamily:C.mono,fontSize:10,color:C.dim,whiteSpace:'pre-wrap'}},JSON.stringify(call.result,null,2).slice(0,500));
+}
+
+function ExpandedToolCall({call,isActive}){
+  const m=TOOL_META[call.tool]||{c:C.dim,icon:'?'};
+  return h('div',{className:'fade-in',style:{border:`1px solid ${m.c}30`,borderRadius:8,overflow:'hidden',marginBottom:8}},
+    h('div',{style:{background:`${m.c}10`,padding:'8px 12px',display:'flex',alignItems:'center',gap:8,borderBottom:`1px solid ${m.c}20`}},
+      h('span',{style:{fontFamily:C.mono,fontSize:13,color:m.c}},m.icon),
+      h('span',{style:{fontFamily:C.mono,fontSize:11,color:m.c,fontWeight:500}},call.tool),
+      h('span',{style:{marginLeft:'auto',fontFamily:C.mono,fontSize:9,color:C.muted}},call.time),
+      isActive&&h('span',{style:{fontFamily:C.mono,fontSize:9,color:C.amber,animation:'pulse 1s infinite'}},`● LIVE`)
+    ),
+    h('div',{style:{padding:'8px 12px',borderBottom:`1px solid ${C.border}`}},
+      h('div',{style:{fontFamily:C.mono,fontSize:9,color:C.muted,marginBottom:4}},'INPUT'),
+      h('pre',{style:{fontFamily:C.mono,fontSize:10,color:C.dim,whiteSpace:'pre-wrap',margin:0}},JSON.stringify(call.params,null,2))
+    ),
+    h('div',{style:{padding:'10px 12px'}},
+      h('div',{style:{fontFamily:C.mono,fontSize:9,color:C.muted,marginBottom:8}},'RESULT'),
+      h(ToolResultViz,{call})
+    )
+  );
+}
+
+function CompactToolCall({call}){
+  const m=TOOL_META[call.tool]||{c:C.dim,icon:'?'};
+  return h('div',{style:{display:'flex',alignItems:'center',gap:8,padding:'6px 10px',background:C.bg2,borderRadius:6,marginBottom:4,border:`1px solid ${C.border}`}},
+    h('span',{style:{fontFamily:C.mono,fontSize:11,color:m.c}},m.icon),
+    h('span',{style:{fontFamily:C.mono,fontSize:10,color:C.muted}},call.tool),
+    h('span',{style:{marginLeft:'auto',fontFamily:C.mono,fontSize:9,color:C.muted}},call.time)
+  );
+}
+
+function EmptyInspector(){
+  return h('div',{style:{padding:'8px 0'}},
+    h('div',{style:{fontFamily:C.mono,fontSize:10,color:C.muted,marginBottom:16,letterSpacing:'0.05em'}},'VERFÜGBARE TOOLS'),
+    ...[
+      {name:'search_permits',desc:'Filter nach Status, Adresse, Antragsteller',color:C.blue},
+      {name:'get_permit_details',desc:'Vollansicht + fehlende Dokumente',color:C.purple},
+      {name:'get_kpi_summary',desc:'Statusverteilung, Überfällige, Workload',color:C.green},
+      {name:'prepare_data_entry',desc:'Formular vorausfüllen für Einreichung',color:C.amber},
+    ].map(t=>h('div',{key:t.name,style:{padding:'10px 12px',background:C.bg2,border:`1px solid ${C.border}`,borderRadius:7,marginBottom:6}},
+      h('div',{style:{fontFamily:C.mono,fontSize:11,color:t.color,marginBottom:3}},`${t.name}()`),
+      h('div',{style:{fontSize:11,color:C.muted}},t.desc)
+    )),
+    h('div',{style:{marginTop:20,padding:'12px',background:C.bg2,border:`1px solid ${C.border}`,borderRadius:8}},
+      h('div',{style:{fontFamily:C.mono,fontSize:9,color:C.muted,marginBottom:6}},'DAS MUSTER'),
+      h('div',{style:{fontSize:11,color:C.dim,lineHeight:1.6}},
+        '"Das HHV-Bau-System war bisher nur über die eigene Oberfläche nutzbar. Als MCP-Server kann Claude direkt Permits abfragen, KPIs ziehen, und Dateneingaben vorbereiten — ohne dass der Sachbearbeiter das System auch nur öffnen muss."'
+      ),
+      h('div',{style:{fontFamily:C.mono,fontSize:9,color:C.muted,marginTop:6}},'— FuseSoftware Demo 2024')
+    )
+  );
+}
+
+function MessageBubble({msg}){
+  const isUser=msg.role==='user';
+  return h('div',{className:'fade-in',style:{marginBottom:16,display:'flex',flexDirection:isUser?'row-reverse':'row',alignItems:'flex-start',gap:8}},
+    h('div',{style:{width:26,height:26,borderRadius:6,background:isUser?C.blue:C.bg3,border:`1px solid ${C.borderHi}`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,flexShrink:0}},
+      isUser?'👤':'🏗'
+    ),
+    h('div',{style:{maxWidth:'82%',padding:'10px 14px',background:isUser?`${C.blue}18`:C.bg2,border:`1px solid ${isUser?C.blue+'40':C.border}`,borderRadius:isUser?'10px 2px 10px 10px':'2px 10px 10px 10px',fontSize:12,lineHeight:1.6,color:C.text,fontFamily:C.sans,whiteSpace:'pre-wrap'}},
+      msg.text
+    )
+  );
+}
+
+function LoadingDots(){
+  return h('div',{style:{display:'flex',alignItems:'center',gap:6,padding:'8px 0 8px 34px'}},
+    ...[0,1,2].map(i=>h('div',{key:i,style:{width:5,height:5,borderRadius:'50%',background:C.blue,animation:`pulse 1.2s ${i*0.2}s infinite`}}))
+  );
+}
+
+function EmptyChat(){
+  return h('div',{style:{padding:'40px 20px',textAlign:'center'}},
+    h('div',{style:{fontSize:28,marginBottom:12}},'🏗'),
+    h('div',{style:{fontSize:18,fontWeight:600,marginBottom:6,letterSpacing:'-0.02em'}},'HHV-Bau Permit Assistant'),
+    h('div',{style:{fontSize:12,color:C.dim,lineHeight:1.7,maxWidth:340,margin:'0 auto 24px'}},
+      'Stellen Sie Fragen auf Deutsch — Claude ruft die Daten direkt aus dem Permit-System ab. Kein manuelles Klicken, kein System öffnen.'
+    ),
+    h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,maxWidth:360,margin:'0 auto'}},
+      [['⊕','Suchen','Antragsteller, Adresse, Status'],['◉','Details','Fehlende Dokumente, Fristen'],['▦','KPIs','Überfällige, Auslastung'],['✎','Formular','Dateneingabe vorbereiten']].map(([icon,title,desc])=>
+        h('div',{key:title,style:{padding:'10px',background:C.bg2,border:`1px solid ${C.border}`,borderRadius:7,textAlign:'left'}},
+          h('div',{style:{fontFamily:C.mono,fontSize:11,color:C.blue,marginBottom:2}},`${icon} ${title}`),
+          h('div',{style:{fontSize:10,color:C.muted}},desc)
+        )
+      )
+    )
+  );
+}
+
+function App(){
+  const [msgs,setMsgs]=useState([]);
+  const [toolCalls,setToolCalls]=useState([]);
+  const [loading,setLoading]=useState(false);
+  const [input,setInput]=useState('');
+  const [activeTool,setActiveTool]=useState(null);
+  const histRef=useRef([]);
+  const bottomRef=useRef(null);
+  const inputRef=useRef(null);
+
+  useEffect(()=>{bottomRef.current?.scrollIntoView({behavior:'smooth'})},[msgs,loading]);
+
+  async function send(text){
+    if(!text.trim()||loading)return;
+    setLoading(true);setInput('');
+    setMsgs(p=>[...p,{role:'user',text}]);
+    histRef.current=[...histRef.current,{role:'user',content:text}];
+    let cur=[...histRef.current];
+    try{
+      while(true){
+        const res=await fetch('https://api.anthropic.com/v1/messages',{
+          method:'POST',headers:{'Content-Type':'application/json','x-api-key':window.__hhvKey||'','anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+          body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1000,system:SYSTEM,tools:TOOL_DEFS,messages:cur})
+        });
+        const data=await res.json();
+        if(data.error) throw new Error(data.error.message);
+        if(data.stop_reason==='tool_use'){
+          const tus=data.content.filter(b=>b.type==='tool_use');
+          const results=[];
+          for(const tu of tus){
+            setActiveTool(tu.name);
+            const result=executeTool(tu.name,tu.input);
+            const tc={id:tu.id,tool:tu.name,params:tu.input,result,time:new Date().toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit',second:'2-digit'})};
+            setToolCalls(p=>[...p,tc]);
+            results.push({type:'tool_result',tool_use_id:tu.id,content:JSON.stringify(result)});
+          }
+          cur=[...cur,{role:'assistant',content:data.content},{role:'user',content:results}];
+        } else {
+          const txt=data.content.filter(b=>b.type==='text').map(b=>b.text).join('');
+          histRef.current=[...cur,{role:'assistant',content:data.content}];
+          setMsgs(p=>[...p,{role:'assistant',text:txt}]);
+          setActiveTool(null);break;
+        }
+      }
+    } catch(e){
+      setMsgs(p=>[...p,{role:'assistant',text:`Fehler: ${e.message}`}]);
+      setActiveTool(null);
+    }
+    setLoading(false);
+    setTimeout(()=>inputRef.current?.focus(),100);
+  }
+
+  const latestCall=toolCalls[toolCalls.length-1];
+
+  return h('div',{style:{fontFamily:C.sans,background:C.bg0,color:C.text,height:'100vh',display:'flex',flexDirection:'column',overflow:'hidden'}},
+    h('div',{style:{height:50,padding:'0 16px',borderBottom:`1px solid ${C.border}`,display:'flex',alignItems:'center',gap:10,flexShrink:0,background:C.bg1}},
+      h('div',{style:{width:28,height:28,background:C.blue,borderRadius:6,display:'flex',alignItems:'center',justifyContent:'center',fontSize:14}},'🏗'),
+      h('span',{style:{fontWeight:600,fontSize:14,letterSpacing:'-0.02em'}},'HHV-Bau'),
+      h('span',{style:{color:C.muted,fontSize:12}},'Permit System · Leipzig'),
+      h('div',{style:{width:1,height:18,background:C.border,margin:'0 2px'}}),
+      h('span',{style:{fontFamily:C.mono,fontSize:10,color:C.green,background:C.greenD,border:`1px solid ${C.green}35`,padding:'2px 8px',borderRadius:4}},'● 4 Tools'),
+      h('span',{style:{fontFamily:C.mono,fontSize:10,color:C.dim,background:C.bg2,border:`1px solid ${C.border}`,padding:'2px 8px',borderRadius:4}},`${PERMITS.length} Permits`),
+      toolCalls.length>0&&h('span',{style:{fontFamily:C.mono,fontSize:10,color:C.blue,background:C.blueD,border:`1px solid ${C.blue}35`,padding:'2px 8px',borderRadius:4}},`${toolCalls.length} Tool Calls`),
+      h('div',{style:{marginLeft:'auto',fontFamily:C.mono,fontSize:9,color:C.muted}},'FuseSoftware Demo · MCP')
+    ),
+    h('div',{style:{display:'flex',flex:1,overflow:'hidden'}},
+      h('div',{style:{width:'52%',borderRight:`1px solid ${C.border}`,display:'flex',flexDirection:'column',overflow:'hidden'}},
+        h('div',{style:{flex:1,overflowY:'auto',padding:'16px 16px 0'}},
+          msgs.length===0&&h(EmptyChat),
+          msgs.map((m,i)=>h(MessageBubble,{key:i,msg:m})),
+          loading&&h(LoadingDots),
+          h('div',{ref:bottomRef,style:{height:16}})
+        ),
+        msgs.length===0&&h('div',{style:{padding:'8px 16px',display:'flex',gap:5,flexWrap:'wrap'}},
+          SUGGESTIONS.map(s=>h('button',{key:s,className:'suggestion-chip',onClick:()=>send(s),style:{fontFamily:C.sans,fontSize:10,color:C.dim,background:C.bg2,border:`1px solid ${C.border}`,padding:'4px 10px',borderRadius:14,cursor:'pointer',transition:'all .15s',whiteSpace:'nowrap'}},s))
+        ),
+        h('div',{style:{padding:'10px 12px 12px',borderTop:`1px solid ${C.border}`,background:C.bg1}},
+          msgs.length>0&&h('div',{style:{display:'flex',gap:5,marginBottom:8,flexWrap:'wrap'}},
+            SUGGESTIONS.slice(0,3).map(s=>h('button',{key:s,className:'suggestion-chip',onClick:()=>send(s),style:{fontFamily:C.sans,fontSize:10,color:C.muted,background:'none',border:`1px solid ${C.border}`,padding:'3px 9px',borderRadius:12,cursor:'pointer',transition:'all .15s'}},s))
+          ),
+          h('div',{style:{display:'flex',gap:8,background:C.bg2,border:`1px solid ${C.borderHi}`,borderRadius:10,padding:'8px 8px 8px 12px',alignItems:'center'}},
+            h('input',{ref:inputRef,value:input,onChange:e=>setInput(e.target.value),onKeyDown:e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send(input);}},placeholder:'Auf Deutsch fragen…',style:{flex:1,background:'none',border:'none',color:C.text,fontSize:12,fontFamily:C.sans}}),
+            h('button',{className:'send-btn',onClick:()=>send(input),disabled:loading||!input.trim(),style:{background:C.blue,border:'none',borderRadius:7,width:30,height:30,cursor:'pointer',color:'white',fontSize:13,transition:'background .15s',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center'}},loading?'…':'↑')
+          )
+        )
+      ),
+      h('div',{style:{width:'48%',display:'flex',flexDirection:'column',overflow:'hidden',background:C.bg1}},
+        h('div',{style:{padding:'12px 16px',borderBottom:`1px solid ${C.border}`,display:'flex',alignItems:'center',gap:8,flexShrink:0}},
+          h('span',{style:{fontFamily:C.mono,fontSize:10,color:C.muted,textTransform:'uppercase',letterSpacing:'0.08em'}},'MCP Inspector'),
+          toolCalls.length>0&&h('span',{style:{fontFamily:C.mono,fontSize:9,color:C.blue,background:C.blueD,border:`1px solid ${C.blue}30`,padding:'1px 6px',borderRadius:3}},`${toolCalls.length} calls`),
+          activeTool&&h('span',{style:{fontFamily:C.mono,fontSize:9,color:C.amber,background:C.amberD,border:`1px solid ${C.amber}30`,padding:'1px 6px',borderRadius:3,animation:'pulse 1s infinite'}},'● LIVE')
+        ),
+        h('div',{style:{flex:1,overflowY:'auto',padding:12}},
+          toolCalls.length===0
+            ? h(EmptyInspector)
+            : h('div',null,
+                h(ExpandedToolCall,{call:latestCall,isActive:!!activeTool}),
+                toolCalls.length>1&&h('div',{style:{marginTop:10}},
+                  h('div',{style:{fontFamily:C.mono,fontSize:9,color:C.muted,textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:6}},'Frühere Aufrufe'),
+                  [...toolCalls].reverse().slice(1).map(tc=>h(CompactToolCall,{key:tc.id,call:tc}))
+                )
+              )
+        )
+      )
+    )
+  );
+}
+
+function KeyGate({onKey}){
+  const [val,setVal]=useState('');
+  return h('div',{className:'key-gate'},
+    h('div',{className:'key-box'},
+      h('div',{style:{fontSize:22,marginBottom:8}},'🏗'),
+      h('div',{style:{fontSize:16,fontWeight:600,marginBottom:4,letterSpacing:'-0.02em'}},'HHV-Bau MCP Demo'),
+      h('div',{style:{fontSize:11,color:'#7a8db0',marginBottom:16,lineHeight:1.6}},'Anthropic API-Schlüssel eingeben um fortzufahren. Der Schlüssel wird nur lokal im Browser gespeichert.'),
+      h('input',{className:'key-input',type:'password',placeholder:'sk-ant-...',value:val,onChange:e=>setVal(e.target.value),onKeyDown:e=>{if(e.key==='Enter'&&val.startsWith('sk-'))onKey(val)}}),
+      h('button',{className:'key-btn',onClick:()=>{if(val.startsWith('sk-'))onKey(val);},disabled:!val.startsWith('sk-')},'Demo starten →'),
+      h('div',{style:{fontSize:10,color:'#38446a',marginTop:12,textAlign:'center'}},'Schlüssel unter platform.anthropic.com/api-keys')
+    )
+  );
+}
+
+function Root(){
+  const saved=sessionStorage.getItem('hhv_key')||'';
+  if(saved) window.__hhvKey=saved;
+  const [key,setKey]=useState(saved);
+  function handleKey(k){window.__hhvKey=k;sessionStorage.setItem('hhv_key',k);setKey(k);}
+  if(!key) return h(KeyGate,{onKey:handleKey});
+  return h(App);
+}
+
+createRoot(document.getElementById('app')).render(h(Root));
+</script>
+</body>
+</html>
+
+
+
